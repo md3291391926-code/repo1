@@ -1,30 +1,39 @@
 name: Generate Kids Smart Tracker Ad
+
 on:
   workflow_dispatch:
+
 permissions:
   contents: read
+
 jobs:
   generate:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
-      - name: Check required secret
+
+      - name: Install FFmpeg and Python dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-dejavu-core
+          python -m pip install --upgrade pip
+          pip install requests edge-tts
+
+      - name: Generate the 30-second vertical MP4
         env:
           REPLICATE_API_TOKEN: ${{ secrets.REPLICATE_API_TOKEN }}
         run: |
           if [ -z "$REPLICATE_API_TOKEN" ]; then
-            echo "Add REPLICATE_API_TOKEN in Settings > Secrets and variables > Actions."
+            echo "Missing secret REPLICATE_API_TOKEN. Add it in Settings > Secrets and variables > Actions."
             exit 1
           fi
-          echo "Secret is configured. Video generation workflow can proceed."
-      - name: Upload instructions
-        run: |
-          mkdir -p output
-          cat > output/README.txt <<'EOF'
-Next step: run the Replicate Wan 2.5 generation script and FFmpeg assembly.
-Final target: 30-second MP4, portrait 9:16, English female narration, burned-in subtitles, hard cuts only.
-EOF
-      - uses: actions/upload-artifact@v4
+          python scripts/generate_ad.py
+
+      - name: Upload final video
+        uses: actions/upload-artifact@v4
         with:
-          name: video-workflow-check
-          path: output/README.txt
+          name: kids-smart-tracker-ad-30s-9x16
+          path: output/kids-smart-tracker-ad-30s-9x16.mp4
+          if-no-files-found: error
+          retention-days: 14
