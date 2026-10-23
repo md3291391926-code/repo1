@@ -26,24 +26,66 @@ def ffmpeg(args):
     subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *args], check=True)
 
 def generate(prompt):
-    response = requests.post(API, headers={**HEADERS, "Prefer": "wait=60"}, json={"input": {
-        "prompt": prompt + " High detail, consistent product design, cinematic camera movement, 5-second commercial shot.",
-        "size": "720*1280", "duration": 5,
-        "negative_prompt": "text, captions, watermark, logo, blurry, distorted product"
-    }}, timeout=120)
-    response.raise_for_status()
+    """Create one Replicate prediction and poll it until it succeeds or fails."""
+    payload = {
+        "input": {
+            "prompt": prompt + " High detail, consistent product design, cinematic camera movement, 5-second commercial shot.",
+            "size": "720*1280",
+            "duration": 5,
+            "negative_prompt": "text, captions, watermark, logo, blurry, distorted product",
+            "enable_prompt_expansion": True,
+        }
+    }
+
+    response = requests.post(
+        API,
+        headers={**HEADERS, "Prefer": "wait=60"},
+        json=payload,
+        timeout=90,
+    )
+    if not response.ok:
+        raise RuntimeError(
+            f"Replicate create-prediction request failed (HTTP {response.status_code}): "
+            f"{response.text[:2000]}"
+        )
     data = response.json()
+    prediction_url = data.get("urls", {}).get("get")
+    if not prediction_url:
+        raise RuntimeError(f"Replicate response did not include urls.get: {data}")
+
+    deadline = time.monotonic() + 3600
     while data.get("status") in ("starting", "processing"):
-        time.sleep(8)
-        data = requests.get(data["urls"]["get"], headers=HEADERS, timeout=60).json()
+        if time.monotonic() >= deadline:
+            raise TimeoutError(f"Replicate prediction timed out. Prediction: {prediction_url}")
+        time.sleep(10)
+        poll = requests.get(prediction_url, headers=HEADERS, timeout=90)
+        if not poll.ok:
+            raise RuntimeError(
+                f"Replicate polling failed (HTTP {poll.status_code}): {poll.text[:2000]}"
+            )
+        data = poll.json()
+        print(f"Replicate prediction status: {data.get('status', 'unknown')}")
+
     if data.get("status") != "succeeded":
-        raise RuntimeError("Replicate video generation failed: " + str(data.get("error")))
-    url = data["output"]
+        raise RuntimeError(
+            f"Replicate video generation status={data.get('status')}; "
+            f"error={data.get('error')}; logs={str(data.get('logs', ''))[-2000:]}"
+        )
+
+    url = data.get("output")
     if isinstance(url, list):
-        url = url[0]
-    r = requests.get(url, timeout=180)
-    r.raise_for_status()
-    return r.content
+        url = url[0] if url else None
+    if not isinstance(url, str) or not url.startswith("https://"):
+        raise RuntimeError(f"Replicate returned an unexpected output value: {url!r}")
+
+    video = requests.get(url, timeout=240)
+    if not video.ok:
+        raise RuntimeError(
+            f"Could not download generated video (HTTP {video.status_code}): {video.text[:500]}"
+        )
+    if not video.content:
+        raise RuntimeError("Replicate returned an empty video file.")
+    return video.content
 
 async def main():
     normalized = []
