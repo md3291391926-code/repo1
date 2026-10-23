@@ -1,0 +1,30 @@
+name: Generate Kids Smart Tracker Ad
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check required secret
+        env:
+          REPLICATE_API_TOKEN: ${{ secrets.REPLICATE_API_TOKEN }}
+        run: |
+          if [ -z "$REPLICATE_API_TOKEN" ]; then
+            echo "Add REPLICATE_API_TOKEN in Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          echo "Secret is configured. Video generation workflow can proceed."
+      - name: Upload instructions
+        run: |
+          mkdir -p output
+          cat > output/README.txt <<'EOF'
+Next step: run the Replicate Wan 2.5 generation script and FFmpeg assembly.
+Final target: 30-second MP4, portrait 9:16, English female narration, burned-in subtitles, hard cuts only.
+EOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: video-workflow-check
+          path: output/README.txt
